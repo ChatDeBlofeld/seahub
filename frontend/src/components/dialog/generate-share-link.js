@@ -13,6 +13,7 @@ import Loading from '../loading';
 import SendLink from '../send-link';
 import SharedLink from '../shared-link';
 import SetLinkExpiration from '../set-link-expiration';
+import SetMultiShareLinks from '../set-multi-share-links';
 
 const propTypes = {
   itemPath: PropTypes.string.isRequired,
@@ -34,8 +35,11 @@ class GenerateShareLink extends React.Component {
     this.state = {
       isOpIconShown: false,
       isValidate: false,
+      shareLinkNum: '',
+      isMultiShareLinksAutoGeneratePasswordChecked: shareLinkForceUsePassword ? true : false,
       isShowPasswordInput: shareLinkForceUsePassword ? true : false,
       isPasswordVisible: false,
+      isGenerateMultiShareLinksChecked: false,
       isExpireChecked: !this.isExpireDaysNoLimit,
       isExpirationEditIconShow: false,
       isEditingExpiration: false,
@@ -102,6 +106,17 @@ class GenerateShareLink extends React.Component {
         });
       }
     }
+  }
+
+  onShareLinkNumChanged = (e) => {
+    let num = e.target.value.trim();
+    this.setState({shareLinkNum: num});
+  }
+
+  onMultiShareLinksAutoGeneratePasswordChecked = () => {
+    this.setState({
+      isMultiShareLinksAutoGeneratePasswordChecked: !this.state.isMultiShareLinksAutoGeneratePasswordChecked,
+    });
   }
 
   setExpType = (e) => {
@@ -188,6 +203,99 @@ class GenerateShareLink extends React.Component {
     }
   }
 
+  validateParamsInputWhenGenerateMulti = () => {
+    let { shareLinkNum, isExpireChecked, expType, expireDays, expDate } = this.state;
+
+    let reg = /^\d+$/;
+
+    if (!shareLinkNum) {
+      this.setState({errorInfo: gettext('Please enter share link num')});
+      return false;
+    }
+    if (!reg.test(shareLinkNum)) {
+      this.setState({errorInfo: gettext('Please enter a non-negative integer')});
+      return false;
+    }
+
+    if (isExpireChecked) {
+      if (expType == 'by-date') {
+        if (!expDate) {
+          this.setState({errorInfo: gettext('Please select an expiration time')});
+          return false;
+        }
+        return true;
+      }
+
+      // by days
+      if (!expireDays) {
+        this.setState({errorInfo: gettext('Please enter days')});
+        return false;
+      }
+      if (!reg.test(expireDays)) {
+        this.setState({errorInfo: gettext('Please enter a non-negative integer')});
+        return false;
+      }
+
+      expireDays = parseInt(expireDays);
+      let minDays = shareLinkExpireDaysMin;
+      let maxDays = shareLinkExpireDaysMax;
+
+      if (minDays !== 0 && maxDays == 0) {
+        if (expireDays < minDays) {
+          this.setState({errorInfo: 'Please enter valid days'});
+          return false;
+        }
+      }
+
+      if (minDays === 0 && maxDays !== 0 ) {
+        if (expireDays > maxDays) {
+          this.setState({errorInfo: 'Please enter valid days'});
+          return false;
+        }
+      }
+
+      if (minDays !== 0 && maxDays !== 0) {
+        if (expireDays < minDays || expireDays > maxDays) {
+          this.setState({errorInfo: 'Please enter valid days'});
+          return false;
+        }
+      }
+
+      this.setState({expireDays: expireDays});
+    }
+
+    return true;
+  }
+
+  generateMultiShareLink = () => {
+    let isValid = this.validateParamsInputWhenGenerateMulti();
+    if (isValid) {
+      this.setState({errorInfo: ''});
+      let { itemPath, repoID } = this.props;
+      let { shareLinkNum, isMultiShareLinksAutoGeneratePasswordChecked, isExpireChecked, expType, expireDays, expDate } = this.state;
+      let permissions;
+      if (isPro) {
+        const permissionDetails = Utils.getShareLinkPermissionObject(this.state.currentPermission).permissionDetails;
+        permissions = JSON.stringify(permissionDetails);
+      }
+      let expirationTime = '';
+      if (isExpireChecked) {
+        if (expType == 'by-days') {
+          expirationTime = moment().add(parseInt(expireDays), 'days').format();
+        } else {
+          expirationTime = expDate.format();
+        }
+      }
+      seafileAPI.createMultiShareLink(repoID, itemPath, shareLinkNum, isMultiShareLinksAutoGeneratePasswordChecked, expirationTime, permissions).then((res) => {
+        let sharedLinkInfo = new ShareLink(res.data);
+        this.setState({sharedLinkInfo: sharedLinkInfo});
+      }).catch((error) => {
+        let errMessage = Utils.getErrorMsg(error);
+        toaster.danger(errMessage);
+      });
+    }
+  }
+
   onCopySharedLink = () => {
     let sharedLink = this.state.sharedLinkInfo.link;
     copy(sharedLink);
@@ -220,6 +328,10 @@ class GenerateShareLink extends React.Component {
       let errMessage = Utils.getErrorMsg(error);
       toaster.danger(errMessage);
     });
+  }
+
+  onGenerateMultiShareLinksChecked = (e) => {
+    this.setState({isGenerateMultiShareLinksChecked: e.target.checked});
   }
 
   onExpireChecked = (e) => {
@@ -507,6 +619,23 @@ class GenerateShareLink extends React.Component {
       return (
         <Form className="generate-share-link">
           <FormGroup check>
+            <Label check>
+              <Input type="checkbox" onChange={this.onGenerateMultiShareLinksChecked} />
+              <span>{gettext('Generate multi share links')}</span>
+            </Label>
+            {this.state.isGenerateMultiShareLinksChecked &&
+              <div className="ml-4">
+                <SetMultiShareLinks
+                  shareLinkNum={this.state.shareLinkNum}
+                  onShareLinkNumChanged={this.onShareLinkNumChanged}
+                  shareLinkForceUsePassword={shareLinkForceUsePassword}
+                  onMultiShareLinksAutoGeneratePasswordChecked={this.onMultiShareLinksAutoGeneratePasswordChecked}
+                />
+              </div>
+            }
+          </FormGroup>
+          {!this.state.isGenerateMultiShareLinksChecked &&
+          <FormGroup check>
             {shareLinkForceUsePassword ? (
               <Label check>
                 <Input type="checkbox" checked readOnly disabled />
@@ -538,6 +667,7 @@ class GenerateShareLink extends React.Component {
             </div>
             }
           </FormGroup>
+          }
           <FormGroup check>
             <Label check>
               {this.isExpireDaysNoLimit ? (
@@ -581,7 +711,9 @@ class GenerateShareLink extends React.Component {
             </FormGroup>
           )}
           {this.state.errorInfo && <Alert color="danger" className="mt-2">{gettext(this.state.errorInfo)}</Alert>}
-          <Button onClick={this.generateShareLink} className="mt-2">{gettext('Generate')}</Button>
+	  {!this.state.isGenerateMultiShareLinksChecked ?
+          <Button onClick={this.generateShareLink} className="mt-2">{gettext('Generate')}</Button> :
+          <Button onClick={this.generateMultiShareLink} className="mt-2">{gettext('Generate Multi')}</Button>}
         </Form>
       );
     }
